@@ -77,3 +77,23 @@ Esecuzione della DAW:
     [ ] Fase 4: Sviluppo del modulo di masterizzazione su CD-R (Interfaccia nativa C++ con strumenti di sistema come wodim / cdrskin).
 
     [ ] Fase 5: Implementazione del motore di mixdown con calcolo dinamico dei Crossfade (dissolvenze incrociate) tra le tracce in lista.
+
+    ### 🎛️ Aggiornamento Modulo di Trasporto & Gestione Timeline (v2.0)
+
+L'interfaccia grafica e il motore DSP sono stati potenziati con un controllo temporale lineare in stile YouTube e algoritmi predittivi per il monitoraggio dei punti di giunzione.
+
+#### 1. Barra di Avanzamento Interattiva (Timeline Slider)
+* **Rendering Sincrono:** Al click su `PLAY`, il motore effettua il mix DSP in background generandone l'anteprima hardware. Un oscillatore hardware (`QTimer` con polling a 100ms) interroga la testina del `QMediaPlayer` aggiornando la posizione dello slider fucsia/ciano.
+* **Scribbling Manuale (Seek):** È supportato il trascinamento manuale della barra. Il sistema disattiva temporaneamente i segnali di aggiornamento automatico durante la pressione (`isUserScribbling = true`) per evitare conflitti di clock e sposta la riproduzione hardware all'esatto millisecondo rilasciato.
+* **Minutaggio Dinamico:** Visualizzazione costante del counter temporale formattato in formato `MM:SS / MM:SS` (Tempo corrente / Durata totale del mix).
+
+#### 2. Logica di Protezione Traccia #1 (Inizio CD)
+* Per garantire la conformità agli standard del Red Book Audio (CD-DA), la **Traccia #1** agisce da punto di ancoraggio della Timeline a $0.0\text{s}$.
+* Il selettore di transizione (`QComboBox`) viene **completamente rimosso** dal primo slot grafico e sostituito da un blocco statico `🏁 INIZIO CD`. Le transizioni e i relativi crossfade (5 secondi) diventano attivi e configurabili esclusivamente a partire dalla seconda traccia in poi.
+
+#### 3. Algoritmo di Salto Intelligente (`⏭️ SALTA A -10s TRANS.`)
+Invece di un salto statico, il pulsante esegue una scansione predittiva in tempo reale basata sulla posizione attuale della testina audio:
+1. Cattura il timestamp corrente del flusso PipeWire.
+2. Scansiona ricorsivamente la Timeline calcolando i punti di intersezione reali (tenendo conto dei 5 secondi di sovrapposizione dei Crossfade inseriti).
+3. Identifica la prima transizione futura rispetto alla posizione attuale.
+4. Sposta istantaneamente la testina del player **esattamente 10 secondi prima dell'inizio del mix** tra i due brani, permettendo un ascolto immediato della bontà del crossfade senza dover riprodurre l'intera traccia.

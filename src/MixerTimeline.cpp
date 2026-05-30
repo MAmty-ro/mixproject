@@ -1,4 +1,4 @@
-#include "MixerTimeline.h"
+#include "../include/MixerTimeline.h"
 #include <iostream>
 #include <fstream>
 #include <cmath>
@@ -11,15 +11,42 @@ MixerTimeline::MixerTimeline() {
 }
 
 void MixerTimeline::aggiungiTraccia(const TracciaAudio& traccia, float tempoInizio, int riga) {
-    ElementoTimeline elemento = {traccia, tempoInizio, riga};
+    // Di default impostiamo la transizione su Crossfade
+    ElementoTimeline elemento = {traccia, tempoInizio, riga, "Crossfade"};
     canaliTimeline.push_back(elemento);
     
-    // Ricalcoliamo la durata totale della timeline
     float fineTraccia = tempoInizio + traccia.getDurata();
     if (fineTraccia > durataTotaleMix) {
         durataTotaleMix = fineTraccia;
     }
-    std::cout << "📌 Traccia '" << traccia.getNomeFile() << "' aggiunta al secondo " << tempoInizio << " sulla riga " << riga << std::endl;
+}
+
+void MixerTimeline::modificaTransizione(size_t indice, const std::string& tipo) {
+    if (indice < canaliTimeline.size()) {
+        canaliTimeline[indice].tipoTransizione = tipo;
+        
+        // Ricalcoliamo la timeline in base al tipo di transizione scelto
+        durataTotaleMix = 0.0f;
+        float tempoCorrente = 0.0f;
+        for (size_t i = 0; i < canaliTimeline.size(); ++i) {
+            if (i > 0) {
+                if (canaliTimeline[i].tipoTransizione == "Cut Diretto") {
+                    // Nessun crossfade, attacca subito dopo la fine della precedente
+                    tempoCorrente = durataTotaleMix;
+                } else if (canaliTimeline[i].tipoTransizione == "Dissolvenza Lunga") {
+                    tempoCorrente = durataTotaleMix - 10.0f; // 10 secondi di mix
+                } else {
+                    tempoCorrente = durataTotaleMix - 5.0f;  // 5 secondi standard
+                }
+                if (tempoCorrente < 0.0f) tempoCorrente = 0.0f;
+                canaliTimeline[i].secondoInizio = tempoCorrente;
+            } else {
+                canaliTimeline[i].secondoInizio = 0.0f;
+            }
+            float fine = canaliTimeline[i].secondoInizio + canaliTimeline[i].audio.getDurata();
+            if (fine > durataTotaleMix) durataTotaleMix = fine;
+        }
+    }
 }
 
 void MixerTimeline::svuotaTimeline() {
@@ -27,106 +54,98 @@ void MixerTimeline::svuotaTimeline() {
     durataTotaleMix = 0.0f;
 }
 
-bool MixerTimeline::esportaMixFinale(const std::string& percorsoOutput, float secondiDissolvenza) {
-    if (canaliTimeline.empty()) {
-        std::cerr << "❌ Errore Mixer: Timeline vuota. Impossibile esportare." << std::endl;
-        return false;
-    }
+bool MixerTimeline::esportaMixFinale(const std::string& percorsoOutput) {
+    if (canaliTimeline.empty()) return false;
 
-    std::cout << "🎛️ Avvio mixaggio hardware. Durata totale stimata: " << durataTotaleMix << " secondi." << std::endl;
+    int frequenzaCampionamento = 44100;
+    int canali = 2;
+    size_t totaleCampioniMix = static_cast<size_t>(durataTotaleMix * frequenzaCampionamento * canali);
+    
+    std::vector<float> bufferMixMaster(totaleCampioniMix, 0.0f);
 
-    // 1. Allochiamo il buffer del mix finale in RAM
-    // 44100 Hz * 2 canali (Stereo) = 88200 campioni per ogni secondo di musica
-    long long totaleCampioniMix = static_cast<long long>(durataTotaleMix * 44100.0f * 2.0f);
-    std::vector<float> bufferMixFinale(totaleCampioniMix, 0.0f);
-
-    // 2. Fondiamo le tracce nel buffer (Algoritmo di Mixdown)
     for (const auto& elemento : canaliTimeline) {
         const auto& campioniTraccia = elemento.audio.getCampioni();
-        long long campionInizioTimeline = static_cast<long long>(elemento.secondoInizio * 44100.0f * 2.0f);
+        size_t campionInizioMaster = static_cast<size_t>(elemento.secondoInizio * frequenzaCampionamento * canali);
         
-        // Assicuriamoci che l'indice rimanga pari (inizio canale Sinistro)
-        if (campionInizioTimeline % 2 != 0) campionInizioTimeline--;
+        float secondiDissolvenza = 5.0f;
+        if (elemento.tipoTransizione == "Dissolvenza Lunga") secondiDissolvenza = 10.0f;
+        if (elemento.tipoTransizione == "Cut Diretto") secondiDissolvenza = 0.0f;
 
-        long long durataCampioniTraccia = campioniTraccia.size();
-        long long campioniDissolvenza = static_cast<long long>(secondiDissolvenza * 44100.0f * 2.0f);
+        size_t campioniDissolvenza = static_cast<size_t>(secondiDissolvenza * frequenzaCampionamento * canali);
+        size_t totaleCampioniTraccia = campioniTraccia.size();
 
-        for (long long i = 0; i < durataCampioniTraccia; ++i) {
-            long long indiceDestinazione = campionInizioTimeline + i;
-            
-            // Protezione da buffer overflow della timeline
-            if (indiceDestinazione >= totaleCampioniMix) break;
+        for (size_t i = 0; i < totaleCampioniTraccia; ++i) {
+            size_t indiceMaster = campionInizioMaster + i;
+            if (indiceMaster >= bufferMixMaster.size()) break;
 
-            // --- ALGORITMO DI DISSOLVENZA (CROSSFADE) ---
             float fattoreVolume = 1.0f;
 
-            // Dissolvenza in entrata (Fade-In) se la traccia è all'inizio
-            if (i < campioniDissolvenza && elemento.secondoInizio > 0) {
-                fattoreVolume = static_cast<float>(i) / campioniDissolvenza;
-            }
-            // Dissolvenza in uscita (Fade-Out) se siamo alla fine della traccia
-            else if (i > (durataCampioniTraccia - campioniDissolvenza)) {
-                long long campioniRimasti = durataCampioniTraccia - i;
-                fattoreVolume = static_cast<float>(campioniRimasti) / campioniDissolvenza;
+            // APPLICAZIONE DEI TRE ALGORITMI DI TRANSIZIONE HARDWARE
+            if (secondiDissolvenza > 0.0f) {
+                // Inviluppo in Ingresso (Fade In)
+                if (i < campioniDissolvenza) {
+                    float t = static_cast<float>(i) / campioniDissolvenza;
+                    if (elemento.tipoTransizione == "Dissolvenza Lunga") {
+                        // Curva ad S logaritmica (Smooth Curve)
+                        fattoreVolume = 3.0f * t * t - 2.0f * t * t * t;
+                    } else {
+                        // Dissolvenza lineare standard
+                        fattoreVolume = t;
+                    }
+                }
+                // Inviluppo in Uscita (Fade Out)
+                else if (i > (totaleCampioniTraccia - campioniDissolvenza)) {
+                    size_t campioniDalFondo = totaleCampioniTraccia - i;
+                    float t = static_cast<float>(campioniDalFondo) / campioniDissolvenza;
+                    if (elemento.tipoTransizione == "Dissolvenza Lunga") {
+                        fattoreVolume = 3.0f * t * t - 2.0f * t * t * t;
+                    } else {
+                        fattoreVolume = t;
+                    }
+                }
             }
 
-            // Somma algebrica dei campioni audio moltiplicati per il volume della dissolvenza
-            bufferMixFinale[indiceDestinazione] += campioniTraccia[i] * fattoreVolume;
+            // Mixaggio matematico lineare con Hard Limiting preventivo
+            bufferMixMaster[indiceMaster] += campioniTraccia[i] * fattoreVolume;
+            if (bufferMixMaster[indiceMaster] > 1.0f) bufferMixMaster[indiceMaster] = 1.0f;
+            if (bufferMixMaster[indiceMaster] < -1.0f) bufferMixMaster[indiceMaster] = -1.0f;
         }
     }
 
-    // 3. HARD LIMITER (Prevenzione del Clipping)
-    // Se sommiamo due tracce a volume massimo, il segnale supera 1.0 o scende sotto -1.0,
-    // creando distorsione digitale (un rumore orribile). Questo ciclo "schiaccia" l'audio entro i limiti di sicurezza.
-    for (long long i = 0; i < totaleCampioniMix; ++i) {
-        if (bufferMixFinale[i] > 1.0f) bufferMixFinale[i] = 1.0f;
-        if (bufferMixFinale[i] < -1.0f) bufferMixFinale[i] = -1.0f;
-    }
-
-    // 4. SCRITTURA FILE WAV FINALE SU DISCO
+    // Salvataggio nel file WAV fisico a 16-bit Stereo 44100Hz
     std::ofstream fileOut(percorsoOutput, std::ios::binary);
-    if (!fileOut.is_open()) {
-        std::cerr << "❌ Errore Mixer: Impossibile creare il file di output." << std::endl;
-        return false;
-    }
+    if (!fileOut.is_open()) return false;
 
-    // Scriviamo l'header standard a 44 byte
-    uint32_t dimensioneDatiAudio = totaleCampioniMix * 2; // 2 byte per campione (16-bit)
-    uint32_t dimensioneFileSenzaRiff = 36 + dimensioneDatiAudio;
+    uint32_t dimensioneDatiAudio = bufferMixMaster.size() * 2;
+    uint32_t dimensioneRiff = 36 + dimensioneDatiAudio;
 
     fileOut.write("RIFF", 4);
-    fileOut.write(reinterpret_cast<const char*>(&dimensioneFileSenzaRiff), 4);
+    fileOut.write(reinterpret_cast<const char*>(&dimensioneRiff), 4);
     fileOut.write("WAVE", 4);
     fileOut.write("fmt ", 4);
     
     uint32_t subChunkSize = 16;
-    uint16_t formatoAudio = 1; // PCM
-    uint16_t canali = 2;       // Stereo
+    uint16_t formatoAudio = 1; 
+    uint16_t numCanali = 2;       
     uint32_t campionamento = 44100;
-    uint32_t byteAlSecondo = 44100 * 2 * 2; // SampleRate * NumChannels * (BitsPerSample/8)
-    uint16_t allineamentoBlocco = 4;        // NumChannels * (BitsPerSample/8)
+    uint32_t byteAlSecondo = 44100 * 2 * 2; 
+    uint16_t allineamentoBlocco = 4;        
     uint16_t bitsPerSample = 16;
 
     fileOut.write(reinterpret_cast<const char*>(&subChunkSize), 4);
     fileOut.write(reinterpret_cast<const char*>(&formatoAudio), 2);
-    fileOut.write(reinterpret_cast<const char*>(&canali), 2);
+    fileOut.write(reinterpret_cast<const char*>(&numCanali), 2);
     fileOut.write(reinterpret_cast<const char*>(&campionamento), 4);
     fileOut.write(reinterpret_cast<const char*>(&byteAlSecondo), 4);
     fileOut.write(reinterpret_cast<const char*>(&allineamentoBlocco), 2);
     fileOut.write(reinterpret_cast<const char*>(&bitsPerSample), 2);
-    
     fileOut.write("data", 4);
     fileOut.write(reinterpret_cast<const char*>(&dimensioneDatiAudio), 4);
 
-    // Convertiamo i float (-1.0 a 1.0) di nuovo in interi a 16-bit (da -32768 a 32767) per salvarli nel file finale
-    std::vector<int16_t> bufferOutput16Bit(totaleCampioniMix);
-    for (long long i = 0; i < totaleCampioniMix; ++i) {
-        bufferOutput16Bit[i] = static_cast<int16_t>(bufferMixFinale[i] * 32767.0f);
+    for (float campione : bufferMixMaster) {
+        int16_t pcm16 = static_cast<int16_t>(campione * 32767.0f);
+        fileOut.write(reinterpret_cast<const char*>(&pcm16), 2);
     }
-
-    fileOut.write(reinterpret_cast<const char*>(bufferOutput16Bit.data()), dimensioneDatiAudio);
     fileOut.close();
-
-    std::cout << "💾 Esportazione completata con successo! File creato: " << percorsoOutput << std::endl;
     return true;
 }

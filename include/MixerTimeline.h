@@ -5,11 +5,12 @@
 #include <vector>
 #include <string>
 
-// Struttura che mappa una traccia sulla griglia temporale
+// Mappa una traccia sulla griglia temporale con la sua transizione specifica
 struct ElementoTimeline {
     TracciaAudio audio;
-    float secondoInizio;  // Il punto esatto della timeline in cui inizia (es. al secondo 10.5)
-    int rigaAssegnata;    // Track 1, Track 2, Track 3...
+    float secondoInizio;  
+    int rigaAssegnata;    
+    std::string tipoTransizione; // "Crossfade", "Cut Diretto", "Dissolvenza Lunga"
 };
 
 class MixerTimeline {
@@ -19,19 +20,15 @@ private:
 
 public:
     MixerTimeline();
-
-    // Aggiunge una traccia posizionandola nel tempo
     void aggiungiTraccia(const TracciaAudio& traccia, float tempoInizio, int riga);
-    
-    // Svuota la timeline
+    void modificaTransizione(size_t indice, const std::string& tipo);
     void svuotaTimeline();
 
-    // IL MOTORE MATEMATICO: Prende tutte le tracce, calcola le sovrapposizioni,
-    // applica le dissolvenze e sputa fuori il file WAV gigante per il CD.
-    bool esportaMixFinale(const std::string& percorsoOutput, float secondiDissolvenza);
+    // IL MOTORE MATEMATICO AGGIORNATO CON GESTIONE TRANSIZIONI REALI
+    bool esportaMixFinale(const std::string& percorsoOutput);
 
-    // Getter
     float getDurataTotale() const { return durataTotaleMix; }
+    const std::vector<ElementoTimeline>& getCanali() const { return canaliTimeline; }
 };
 
 #endif // MIXERTIMELINE_H

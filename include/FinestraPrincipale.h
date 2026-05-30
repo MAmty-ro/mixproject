@@ -4,52 +4,70 @@
 #include <QWidget>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QVBoxLayout>
 #include <QLabel>
 #include <QProgressBar>
 #include <QScrollArea>
-#include <QProcess>
-#include <QComboBox> // Aggiunto per la selezione delle transizioni
+#include <QSlider>
+#include <QTimer>
+#include <QVBoxLayout>
 #include <vector>
 #include <string>
+
+#include <QMediaPlayer>
+#include <QAudioOutput>
+
 #include "MixerTimeline.h"
 
 class FinestraPrincipale : public QWidget {
+    Q_OBJECT
+
 private:
     QLineEdit* inputUrl;
     QPushButton* pulsanteScarica;
-    QProgressBar* barraProgresso;
+    QPushButton* pulsanteCaricaLocale;
     QLabel* labelStatoDownload;
-    QVBoxLayout* layoutListaTracce;
+    QProgressBar* barraProgresso;
     QScrollArea* areaScorrimentoTracce;
+    QVBoxLayout* layoutListaTracce;
     QLabel* labelTempoTotaleCD;
     QPushButton* pulsanteMasterizza;
-
-    // --- NUOVI CONTROLLI DI TRASPORTO AUDIO ---
-    QPushButton* pulsantePlayPause;
+    
+    // Controlli di trasporto avanzati
+    QPushButton* pulsantePlay;
     QPushButton* pulsanteStop;
-    QComboBox* selettoreVelocita;
-    bool inRiproduzione; // Stato della riproduzione attuale
+    QPushButton* pulsanteVelocita;
+    QPushButton* pulsanteSkipTransizione; 
+    QSlider* sliderTempoMix;              
+    QLabel* labelMinutaggioCorrente;      
 
-    // Strutture di stato e processo asincrono
+    QMediaPlayer* lettoreAudio;
+    QAudioOutput* uscitaAudio;
+    QTimer* timerAggiornamentoPosizione;  
+    bool isUserScribbling;                 
+
     MixerTimeline timeline;
     std::vector<std::string> percorsiWavScaricati;
-    QProcess* processoPython; 
+    std::vector<int> tipiTransizioni; 
+    bool isDoubleSpeed;
 
     void applicaStileCyberpunk();
+    void aggiungiTracciaAllaLista(int indice, const std::string& nomeFile, float durata, int tipoTransizioneAttuale);
+    void aggiornaInterfacciaTracce();
+    QString formattaTempo(int millisecondi);
+
+    void gestisciDownload();
+    void gestisciCaricamentoLocale();
+    void rimuoviTraccia(int indice);
+    void gestisciPlay();
+    void gestisciStop();
+    void gestisciVelocita();
+    void gestisciSkipTransizione();
+    void gestisciSpostamentoManualeBarra(int posizione);
+    void gestisciMasterizzazione();
 
 public:
-    FinestraPrincipale(QWidget *parent = nullptr);
-    void gestisciDownload();
-    void completatoDownload(int exitCode, QProcess::ExitStatus exitStatus);
-    void gestisciMasterizzazione();
-    void aggiungiTracciaAllaLista(const std::string& nomeFile, float durata);
-    
-    // --- NUOVE FUNZIONI DI CONTROLLO LOGICO ---
-    void gestisciPlayPause();
-    void gestisciStop();
-    void cambiaVelocita(const QString& velocita);
-    void cambiaTransizioneTraccia(int indiceTraccia, const QString& tipoTransizione);
+    explicit FinestraPrincipale(QWidget *parent = nullptr);
+    ~FinestraPrincipale() = default;
 };
 
 #endif // FINESTRAPRINCIPALE_H
