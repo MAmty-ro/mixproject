@@ -6,19 +6,21 @@
 
 class TracciaAudio {
 private:
-    std::string nomeFile;
     std::string percorsoAssoluto;
+    std::string nomeFile;
     float durataSecondi;
     std::vector<float> campioniAudio;
 
 public:
-    TracciaAudio(const std::string& percorso);
+    TracciaAudio();
+    explicit TracciaAudio(const std::string& percorso);
+    
     bool caricaInMemoria();
     void analizzaFormaDOnda();
 
-    std::string getNomeFile() const { return nomeFile; }
     std::string getPercorso() const { return percorsoAssoluto; }
-    float getDurata() const { return durataSecondi; }
+    std::string getNomeFile() const { return nomeFile; }
+    float getDurata() const { return durataSecondi; } 
     const std::vector<float>& getCampioni() const { return campioniAudio; }
 };
 

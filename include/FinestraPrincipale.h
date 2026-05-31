@@ -6,16 +6,15 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QProgressBar>
-#include <QScrollArea>
 #include <QSlider>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <vector>
 #include <string>
-
 #include <QMediaPlayer>
 #include <QAudioOutput>
 
+#include "TimelineVisiva.h"
 #include "MixerTimeline.h"
 
 class FinestraPrincipale : public QWidget {
@@ -27,16 +26,11 @@ private:
     QPushButton* pulsanteCaricaLocale;
     QLabel* labelStatoDownload;
     QProgressBar* barraProgresso;
-    QScrollArea* areaScorrimentoTracce;
-    QVBoxLayout* layoutListaTracce;
+    TimelineVisiva* timelineVisiva;
     QLabel* labelTempoTotaleCD;
     QPushButton* pulsanteMasterizza;
-    
-    // Controlli di trasporto avanzati
     QPushButton* pulsantePlay;
     QPushButton* pulsanteStop;
-    QPushButton* pulsanteVelocita;
-    QPushButton* pulsanteSkipTransizione; 
     QSlider* sliderTempoMix;              
     QLabel* labelMinutaggioCorrente;      
 
@@ -44,25 +38,16 @@ private:
     QAudioOutput* uscitaAudio;
     QTimer* timerAggiornamentoPosizione;  
     bool isUserScribbling;                 
-
-    MixerTimeline timeline;
-    std::vector<std::string> percorsiWavScaricati;
-    std::vector<int> tipiTransizioni; 
-    bool isDoubleSpeed;
+    MixerTimeline timelineEngine; 
 
     void applicaStileCyberpunk();
-    void aggiungiTracciaAllaLista(int indice, const std::string& nomeFile, float durata, int tipoTransizioneAttuale);
-    void aggiornaInterfacciaTracce();
     QString formattaTempo(int millisecondi);
+    void sincronizzaEngineDSP(); 
 
     void gestisciDownload();
     void gestisciCaricamentoLocale();
-    void rimuoviTraccia(int indice);
     void gestisciPlay();
     void gestisciStop();
-    void gestisciVelocita();
-    void gestisciSkipTransizione();
-    void gestisciSpostamentoManualeBarra(int posizione);
     void gestisciMasterizzazione();
 
 public:

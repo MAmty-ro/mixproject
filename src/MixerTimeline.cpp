@@ -1,150 +1,126 @@
 #include "../include/MixerTimeline.h"
-#include <iostream>
 #include <fstream>
-#include <cmath>
+#include <iostream>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
-#include <cstdint>
 
-MixerTimeline::MixerTimeline() {
-    durataTotaleMix = 0.0f;
-}
-
-void MixerTimeline::aggiungiTraccia(const TracciaAudio& traccia, float tempoInizio, int riga) {
-    // Di default impostiamo la transizione su Crossfade
-    ElementoTimeline elemento = {traccia, tempoInizio, riga, "Crossfade"};
-    canaliTimeline.push_back(elemento);
-    
-    float fineTraccia = tempoInizio + traccia.getDurata();
-    if (fineTraccia > durataTotaleMix) {
-        durataTotaleMix = fineTraccia;
-    }
-}
-
-void MixerTimeline::modificaTransizione(size_t indice, const std::string& tipo) {
-    if (indice < canaliTimeline.size()) {
-        canaliTimeline[indice].tipoTransizione = tipo;
-        
-        // Ricalcoliamo la timeline in base al tipo di transizione scelto
-        durataTotaleMix = 0.0f;
-        float tempoCorrente = 0.0f;
-        for (size_t i = 0; i < canaliTimeline.size(); ++i) {
-            if (i > 0) {
-                if (canaliTimeline[i].tipoTransizione == "Cut Diretto") {
-                    // Nessun crossfade, attacca subito dopo la fine della precedente
-                    tempoCorrente = durataTotaleMix;
-                } else if (canaliTimeline[i].tipoTransizione == "Dissolvenza Lunga") {
-                    tempoCorrente = durataTotaleMix - 10.0f; // 10 secondi di mix
-                } else {
-                    tempoCorrente = durataTotaleMix - 5.0f;  // 5 secondi standard
-                }
-                if (tempoCorrente < 0.0f) tempoCorrente = 0.0f;
-                canaliTimeline[i].secondoInizio = tempoCorrente;
-            } else {
-                canaliTimeline[i].secondoInizio = 0.0f;
-            }
-            float fine = canaliTimeline[i].secondoInizio + canaliTimeline[i].audio.getDurata();
-            if (fine > durataTotaleMix) durataTotaleMix = fine;
-        }
-    }
+void MixerTimeline::aggiungiTracciaVisiva(const std::string& percorso, float posizione, float offsetInizio, float durataTaglio) {
+    ElementoTimeline clip;
+    clip.percorsoFile = percorso;
+    clip.posizioneTimeline = posizione;
+    clip.offsetInizio = offsetInizio;
+    clip.durataTaglio = durataTaglio;
+    listaClips.push_back(clip);
 }
 
 void MixerTimeline::svuotaTimeline() {
-    canaliTimeline.clear();
-    durataTotaleMix = 0.0f;
+    listaClips.clear();
 }
 
-bool MixerTimeline::esportaMixFinale(const std::string& percorsoOutput) {
-    if (canaliTimeline.empty()) return false;
+float MixerTimeline::getDurataMassimaTimeline() const {
+    float maxDurata = 0.0f;
+    for (const auto& clip : listaClips) {
+        float fineClip = clip.posizioneTimeline + clip.durataTaglio;
+        if (fineClip > maxDurata) maxDurata = fineClip;
+    }
+    return maxDurata;
+}
 
-    int frequenzaCampionamento = 44100;
-    int canali = 2;
-    size_t totaleCampioniMix = static_cast<size_t>(durataTotaleMix * frequenzaCampionamento * canali);
+bool MixerTimeline::esportaMixFinale(const std::string& outputPercorso) {
+    float durataTotaleS = getDurataMassimaTimeline();
+    if (durataTotaleS <= 0.0f) return false;
+
+    uint32_t sampleRate = 44100;
+    uint32_t canali = 2;
+    uint64_t totaleCampioniMaster = static_cast<uint64_t>(durataTotaleS * sampleRate);
     
-    std::vector<float> bufferMixMaster(totaleCampioniMix, 0.0f);
+    std::vector<float> bufferMasterL(totaleCampioniMaster, 0.0f);
+    std::vector<float> bufferMasterR(totaleCampioniMaster, 0.0f);
 
-    for (const auto& elemento : canaliTimeline) {
-        const auto& campioniTraccia = elemento.audio.getCampioni();
-        size_t campionInizioMaster = static_cast<size_t>(elemento.secondoInizio * frequenzaCampionamento * canali);
-        
-        float secondiDissolvenza = 5.0f;
-        if (elemento.tipoTransizione == "Dissolvenza Lunga") secondiDissolvenza = 10.0f;
-        if (elemento.tipoTransizione == "Cut Diretto") secondiDissolvenza = 0.0f;
+    for (const auto& clip : listaClips) {
+        std::ifstream fileWav(clip.percorsoFile, std::ios::binary);
+        if (!fileWav.is_open()) continue;
 
-        size_t campioniDissolvenza = static_cast<size_t>(secondiDissolvenza * frequenzaCampionamento * canali);
-        size_t totaleCampioniTraccia = campioniTraccia.size();
+        char idRiff[4], idWave[4];
+        uint32_t dimensioneFile;
+        fileWav.read(idRiff, 4);
+        fileWav.read(reinterpret_cast<char*>(&dimensioneFile), 4);
+        fileWav.read(idWave, 4);
 
-        for (size_t i = 0; i < totaleCampioniTraccia; ++i) {
-            size_t indiceMaster = campionInizioMaster + i;
-            if (indiceMaster >= bufferMixMaster.size()) break;
-
-            float fattoreVolume = 1.0f;
-
-            // APPLICAZIONE DEI TRE ALGORITMI DI TRANSIZIONE HARDWARE
-            if (secondiDissolvenza > 0.0f) {
-                // Inviluppo in Ingresso (Fade In)
-                if (i < campioniDissolvenza) {
-                    float t = static_cast<float>(i) / campioniDissolvenza;
-                    if (elemento.tipoTransizione == "Dissolvenza Lunga") {
-                        // Curva ad S logaritmica (Smooth Curve)
-                        fattoreVolume = 3.0f * t * t - 2.0f * t * t * t;
-                    } else {
-                        // Dissolvenza lineare standard
-                        fattoreVolume = t;
-                    }
-                }
-                // Inviluppo in Uscita (Fade Out)
-                else if (i > (totaleCampioniTraccia - campioniDissolvenza)) {
-                    size_t campioniDalFondo = totaleCampioniTraccia - i;
-                    float t = static_cast<float>(campioniDalFondo) / campioniDissolvenza;
-                    if (elemento.tipoTransizione == "Dissolvenza Lunga") {
-                        fattoreVolume = 3.0f * t * t - 2.0f * t * t * t;
-                    } else {
-                        fattoreVolume = t;
-                    }
-                }
-            }
-
-            // Mixaggio matematico lineare con Hard Limiting preventivo
-            bufferMixMaster[indiceMaster] += campioniTraccia[i] * fattoreVolume;
-            if (bufferMixMaster[indiceMaster] > 1.0f) bufferMixMaster[indiceMaster] = 1.0f;
-            if (bufferMixMaster[indiceMaster] < -1.0f) bufferMixMaster[indiceMaster] = -1.0f;
+        if (std::strncmp(idRiff, "RIFF", 4) != 0 || std::strncmp(idWave, "WAVE", 4) != 0) {
+            fileWav.close();
+            continue;
         }
+
+        char subChunkId[4];
+        uint32_t subChunkSize;
+        uint64_t posizioneDataChunk = 0;
+        uint32_t byteAlSecondo = 44100 * 2 * 2; 
+
+        while (fileWav.read(subChunkId, 4)) {
+            fileWav.read(reinterpret_cast<char*>(&subChunkSize), 4);
+            if (std::strncmp(subChunkId, "fmt ", 4) == 0) {
+                fileWav.seekg(8, std::ios::cur); 
+                fileWav.read(reinterpret_cast<char*>(&byteAlSecondo), 4);
+                fileWav.seekg(subChunkSize - 12, std::ios::cur);
+            } 
+            else if (std::strncmp(subChunkId, "data", 4) == 0) {
+                posizioneDataChunk = fileWav.tellg();
+                break;
+            } 
+            else {
+                fileWav.seekg(subChunkSize, std::ios::cur);
+            }
+        }
+
+        if (posizioneDataChunk == 0) {
+            fileWav.close();
+            continue;
+        }
+
+        uint64_t byteOffsetInizio = static_cast<uint64_t>(clip.offsetInizio * byteAlSecondo);
+        // Allineamento al blocco da 4 byte (2 canali * 2 byte)
+        byteOffsetInizio = (byteOffsetInizio / 4) * 4; 
+        
+        fileWav.seekg(posizioneDataChunk + byteOffsetInizio, std::ios::beg);
+
+        uint64_t campioneInizioTimeline = static_cast<uint64_t>(clip.posizioneTimeline * sampleRate);
+        uint64_t campioniDaLeggere = static_cast<uint64_t>(clip.durataTaglio * sampleRate);
+
+        for (uint64_t i = 0; i < campioniDaLeggere; ++i) {
+            if (campioneInizioTimeline + i >= totaleCampioniMaster) break;
+
+            int16_t sampleL = 0, sampleR = 0;
+            fileWav.read(reinterpret_cast<char*>(&sampleL), 2);
+            fileWav.read(reinterpret_cast<char*>(&sampleR), 2);
+            if (fileWav.gcount() < 4) break; 
+
+            bufferMasterL[campioneInizioTimeline + i] += static_cast<float>(sampleL) / 32768.0f;
+            bufferMasterR[campioneInizioTimeline + i] += static_cast<float>(sampleR) / 32768.0f;
+        }
+        fileWav.close();
     }
 
-    // Salvataggio nel file WAV fisico a 16-bit Stereo 44100Hz
-    std::ofstream fileOut(percorsoOutput, std::ios::binary);
+    std::ofstream fileOut(outputPercorso, std::ios::binary);
     if (!fileOut.is_open()) return false;
 
-    uint32_t dimensioneDatiAudio = bufferMixMaster.size() * 2;
-    uint32_t dimensioneRiff = 36 + dimensioneDatiAudio;
+    WavHeader header;
+    uint32_t dataSizeBytes = totaleCampioniMaster * canali * 2;
+    header.subchunk2Size = dataSizeBytes;
+    header.chunkSize = 36 + dataSizeBytes;
 
-    fileOut.write("RIFF", 4);
-    fileOut.write(reinterpret_cast<const char*>(&dimensioneRiff), 4);
-    fileOut.write("WAVE", 4);
-    fileOut.write("fmt ", 4);
-    
-    uint32_t subChunkSize = 16;
-    uint16_t formatoAudio = 1; 
-    uint16_t numCanali = 2;       
-    uint32_t campionamento = 44100;
-    uint32_t byteAlSecondo = 44100 * 2 * 2; 
-    uint16_t allineamentoBlocco = 4;        
-    uint16_t bitsPerSample = 16;
+    fileOut.write(reinterpret_cast<char*>(&header), sizeof(WavHeader));
 
-    fileOut.write(reinterpret_cast<const char*>(&subChunkSize), 4);
-    fileOut.write(reinterpret_cast<const char*>(&formatoAudio), 2);
-    fileOut.write(reinterpret_cast<const char*>(&numCanali), 2);
-    fileOut.write(reinterpret_cast<const char*>(&campionamento), 4);
-    fileOut.write(reinterpret_cast<const char*>(&byteAlSecondo), 4);
-    fileOut.write(reinterpret_cast<const char*>(&allineamentoBlocco), 2);
-    fileOut.write(reinterpret_cast<const char*>(&bitsPerSample), 2);
-    fileOut.write("data", 4);
-    fileOut.write(reinterpret_cast<const char*>(&dimensioneDatiAudio), 4);
+    for (uint64_t i = 0; i < totaleCampioniMaster; ++i) {
+        float fL = std::max(-1.0f, std::min(1.0f, bufferMasterL[i]));
+        float fR = std::max(-1.0f, std::min(1.0f, bufferMasterR[i]));
 
-    for (float campione : bufferMixMaster) {
-        int16_t pcm16 = static_cast<int16_t>(campione * 32767.0f);
-        fileOut.write(reinterpret_cast<const char*>(&pcm16), 2);
+        int16_t outL = static_cast<int16_t>(fL * 32767.0f);
+        int16_t outR = static_cast<int16_t>(fR * 32767.0f);
+
+        fileOut.write(reinterpret_cast<char*>(&outL), 2);
+        fileOut.write(reinterpret_cast<char*>(&outR), 2);
     }
     fileOut.close();
     return true;

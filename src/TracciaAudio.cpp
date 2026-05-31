@@ -4,6 +4,12 @@
 #include <cstring>
 #include <cstdint>
 
+TracciaAudio::TracciaAudio() {
+    percorsoAssoluto = "";
+    nomeFile = "";
+    durataSecondi = 0.0f;
+}
+
 TracciaAudio::TracciaAudio(const std::string& percorso) {
     percorsoAssoluto = percorso;
     size_t ultimoSlash = percorso.find_last_of("/\\");
@@ -47,7 +53,6 @@ bool TracciaAudio::caricaInMemoria() {
             file.read(reinterpret_cast<char*>(&campionamento), 4);
             file.read(reinterpret_cast<char*>(&byteAlSecondo), 4);
             
-            // Salta il resto del chunk fmt se è più grande di 16 byte
             file.seekg(subChunkSize - 12, std::ios::cur);
 
             if (campionamento != 44100 || numCanali != 2) {
